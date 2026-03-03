@@ -8,6 +8,7 @@ import {
   signChallenge,
   getCachedDeviceToken,
   cacheDeviceToken,
+  clearDeviceIdentity,
 } from '@/lib/device-identity'
 import { APP_VERSION } from '@/lib/version'
 
@@ -49,6 +50,7 @@ export function useWebSocket() {
   const reconnectAttemptsRef = useRef<number>(0)
   const manualDisconnectRef = useRef<boolean>(false)
   const connectRef = useRef<(url: string, token?: string) => void>(() => {})
+  const deviceIdentityRetryRef = useRef<boolean>(false)
 
   // Heartbeat tracking
   const pingCounterRef = useRef<number>(0)
@@ -289,6 +291,7 @@ export function useWebSocket() {
       console.log('Handshake complete!')
       handshakeCompleteRef.current = true
       reconnectAttemptsRef.current = 0
+      deviceIdentityRetryRef.current = false
       // Cache device token if returned by gateway
       if (frame.result?.deviceToken) {
         cacheDeviceToken(frame.result.deviceToken)
@@ -312,6 +315,25 @@ export function useWebSocket() {
     // Handle connect error
     if (frame.type === 'res' && !frame.ok) {
       console.error('Gateway error:', frame.error)
+      const errorMessage = String(frame.error?.message || frame.error || '').toLowerCase()
+      const isDeviceIdentityMismatch = errorMessage.includes('device identity mismatch')
+      if (!handshakeCompleteRef.current && isDeviceIdentityMismatch && !deviceIdentityRetryRef.current) {
+        deviceIdentityRetryRef.current = true
+        clearDeviceIdentity()
+        addLog({
+          id: `warn-${Date.now()}`,
+          timestamp: Date.now(),
+          level: 'warn',
+          source: 'gateway',
+          message: 'Detected device identity mismatch. Cleared cached identity and reconnecting once automatically.',
+        })
+        try {
+          ws.close(4001, 'device identity mismatch - retry')
+        } catch {
+          // Best effort close.
+        }
+        return
+      }
       addLog({
         id: `error-${Date.now()}`,
         timestamp: Date.now(),
@@ -418,6 +440,7 @@ export function useWebSocket() {
     reconnectUrl.current = url
     handshakeCompleteRef.current = false
     manualDisconnectRef.current = false
+    deviceIdentityRetryRef.current = false
 
     try {
       const ws = new WebSocket(url.split('?')[0]) // Connect without query params
