@@ -5,7 +5,7 @@ import { useMissionControl } from '@/store'
 import { normalizeModel } from '@/lib/utils'
 import {
   getOrCreateDeviceIdentity,
-  signChallenge,
+  signPayload,
   getCachedDeviceToken,
   cacheDeviceToken,
 } from '@/lib/device-identity'
@@ -150,10 +150,26 @@ export function useWebSocket() {
     if (nonce) {
       try {
         const identity = await getOrCreateDeviceIdentity()
-        const { signature, signedAt } = await signChallenge(identity.privateKey, nonce)
+        const clientId = 'gateway-client'
+        const clientMode = 'ui'
+        const role = 'operator'
+        const scopes = ['operator.admin']
+        const signedAt = Date.now()
+        const signingPayload = [
+          'v2',
+          identity.deviceId,
+          clientId,
+          clientMode,
+          role,
+          scopes.join(','),
+          String(signedAt),
+          authTokenRef.current || '',
+          nonce,
+        ].join('|')
+        const { signature } = await signPayload(identity.privateKey, signingPayload)
         device = {
           id: identity.deviceId,
-          publicKey: identity.publicKeyBase64,
+          publicKey: identity.publicKeyBase64Url,
           signature,
           signedAt,
           nonce,
