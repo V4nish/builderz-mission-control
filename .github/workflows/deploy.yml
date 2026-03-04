@@ -66,6 +66,8 @@ AUTH_PASS=${{ secrets.MC_AUTH_PASSWORD }}
 API_KEY=${{ secrets.MC_API_KEY }}
 OPENCLAW_HOME=/home/vlabs/.openclaw
 MC_DISABLE_SCHEDULER=1
+MC_ORGANIZATION_NAME="Vanish Labs"
+MC_ORGANIZATION_TAGLINE="AI-powered solutions for education and wellness"
 ENVEOF
 
           # Update or create PM2 ecosystem

@@ -10,12 +10,12 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'Mission Control',
-  description: 'OpenClaw Agent Orchestration Dashboard',
+  title: 'Vanish Labs Control',
+  description: 'Vanish Labs Mission Control — AI Agent Orchestration and Infrastructure Monitoring',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Mission Control',
+    title: 'Vanish Labs Control',
   },
 }
 
