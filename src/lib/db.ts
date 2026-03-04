@@ -55,7 +55,7 @@ function initializeSchema() {
 
       // Start built-in scheduler for auto-backup and auto-cleanup.
       // Avoid running background jobs during `next build` static generation.
-      if (process.env.NEXT_PHASE !== 'phase-production-build') {
+      if (process.env.NEXT_PHASE !== 'phase-production-build' && process.env.MC_DISABLE_SCHEDULER !== '1') {
         import('./scheduler').then(({ initScheduler }) => {
           initScheduler();
         }).catch(() => {

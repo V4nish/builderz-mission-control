@@ -215,6 +215,9 @@ export function initScheduler() {
     logger.warn({ err }, 'Agent auto-sync failed')
   })
 
+  // Debug: log what tasks are being registered
+  logger.info('Scheduler: Initializing tasks...')
+
   // Register tasks
   const now = Date.now()
   // Stagger the initial runs: backup at ~3 AM, cleanup at ~4 AM (relative to process start)
@@ -257,18 +260,22 @@ export function initScheduler() {
     running: false,
   })
 
-  tasks.set('claude_session_scan', {
-    name: 'Claude Session Scan',
-    intervalMs: TICK_MS, // Every 60s — lightweight file stat checks
-    lastRun: null,
-    nextRun: now + 5_000, // First scan 5s after startup
-    enabled: true,
-    running: false,
-  })
+  // Temporarily disabled - causes process crashes
+  // tasks.set('claude_session_scan', {
+  //   name: 'Claude Session Scan',
+  //   intervalMs: TICK_MS, // Every 60s — lightweight file stat checks
+  //   lastRun: null,
+  //   nextRun: now + 5_000, // First scan 5s after startup
+  //   enabled: true,
+  //   running: false,
+  // })
 
   // Start the tick loop
   tickInterval = setInterval(tick, TICK_MS)
-  logger.info('Scheduler initialized - backup at ~3AM, cleanup at ~4AM, heartbeat every 5m, webhook retry every 60s, claude scan every 60s')
+  
+  // Debug: log registered tasks
+  const taskNames = Array.from(tasks.keys())
+  logger.info(`Scheduler initialized with tasks: ${taskNames.join(', ')}`)
 }
 
 /** Calculate ms until next occurrence of a given hour (UTC) */
@@ -295,9 +302,10 @@ async function tick() {
       : id === 'webhook_retry' ? 'webhooks.retry_enabled'
       : id === 'claude_session_scan' ? 'general.claude_session_scan'
       : 'general.agent_heartbeat'
-    const defaultEnabled = id === 'agent_heartbeat' || id === 'webhook_retry' || id === 'claude_session_scan'
+    const defaultEnabled = id === 'agent_heartbeat' || id === 'webhook_retry' // || id === 'claude_session_scan' // Temporarily disabled for debugging
     if (!isSettingEnabled(settingKey, defaultEnabled)) continue
 
+    logger.info(`Scheduler: Starting task ${id}`)
     task.running = true
     try {
       const result = id === 'auto_backup' ? await runBackup()
@@ -306,7 +314,9 @@ async function tick() {
         : id === 'claude_session_scan' ? await syncClaudeSessions()
         : await runCleanup()
       task.lastResult = { ...result, timestamp: now }
+      logger.info(`Scheduler: Task ${id} completed successfully`)
     } catch (err: any) {
+      logger.error({ err }, `Scheduler: Task ${id} failed`)
       task.lastResult = { ok: false, message: err.message, timestamp: now }
     } finally {
       task.running = false
@@ -334,7 +344,7 @@ export function getSchedulerStatus() {
       : id === 'webhook_retry' ? 'webhooks.retry_enabled'
       : id === 'claude_session_scan' ? 'general.claude_session_scan'
       : 'general.agent_heartbeat'
-    const defaultEnabled = id === 'agent_heartbeat' || id === 'webhook_retry' || id === 'claude_session_scan'
+    const defaultEnabled = id === 'agent_heartbeat' || id === 'webhook_retry' // || id === 'claude_session_scan' // Temporarily disabled for debugging
     result.push({
       id,
       name: task.name,

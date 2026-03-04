@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import net from 'node:net'
+import os from 'node:os'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { runCommand, runOpenClaw, runClawdbot } from '@/lib/command'
@@ -187,6 +188,7 @@ async function getSystemStatus(workspaceId: number) {
   const status: any = {
     timestamp: Date.now(),
     uptime: 0,
+    cpu: { usage: 0, cores: 0, loadAvg: [0, 0, 0] },
     memory: { total: 0, used: 0, available: 0 },
     disk: { total: 0, used: 0, available: 0 },
     sessions: { total: 0, active: 0 },
@@ -202,6 +204,20 @@ async function getSystemStatus(workspaceId: number) {
     status.uptime = Date.now() - bootTime.getTime()
   } catch (error) {
     logger.error({ err: error }, 'Error getting uptime')
+  }
+
+  try {
+    // CPU metrics (simplified)
+    const cpuCount = os.cpus().length
+    const loadAvg = os.loadavg()
+    status.cpu = {
+      usage: Math.min(Math.round((loadAvg[0] / cpuCount) * 100), 100),
+      cores: cpuCount,
+      load: loadAvg[0]
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'Error getting CPU info')
+    status.cpu = { usage: 0, cores: 0, load: 0 }
   }
 
   try {
