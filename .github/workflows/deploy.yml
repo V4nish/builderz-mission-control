@@ -1,0 +1,140 @@
+name: Deploy Mission Control to vanish-pub1
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: latest
+
+    - name: Install dependencies
+      run: pnpm install
+
+    - name: Build application
+      run: MC_DISABLE_SCHEDULER=1 pnpm build
+      env:
+        NODE_ENV: production
+
+    - name: Setup SSH key
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.VANISH_PUB1_SSH_KEY }}
+
+    - name: Add server to known hosts
+      run: |
+        ssh-keyscan -H 89.167.101.65 >> ~/.ssh/known_hosts
+
+    - name: Deploy to vanish-pub1
+      run: |
+        # Create remote deployment directory
+        ssh vlabs@89.167.101.65 "mkdir -p ~/apps/mission-control-new"
+        
+        # Sync built application
+        rsync -avz --delete \
+          --exclude='.git' \
+          --exclude='node_modules' \
+          --exclude='.env*' \
+          ./ vlabs@89.167.101.65:~/apps/mission-control-new/
+        
+        # Install dependencies and configure on remote
+        ssh vlabs@89.167.101.65 << 'EOF'
+          cd ~/apps/mission-control-new
+          
+          # Install production dependencies
+          pnpm install --prod
+          
+          # Create production env file
+          cat > .env.production << 'ENVEOF'
+AUTH_USER=lyndon
+AUTH_PASS=${{ secrets.MC_AUTH_PASSWORD }}
+API_KEY=${{ secrets.MC_API_KEY }}
+OPENCLAW_HOME=/home/vlabs/.openclaw
+MC_DISABLE_SCHEDULER=1
+ENVEOF
+
+          # Update or create PM2 ecosystem
+          cat > ecosystem.config.js << 'JSEOF'
+module.exports = {
+  apps: [{
+    name: 'mission-control-new',
+    script: './node_modules/.bin/next',
+    args: 'start --hostname 0.0.0.0 --port 3016',
+    cwd: '/home/vlabs/apps/mission-control-new',
+    env: {
+      NODE_ENV: 'production',
+      PORT: '3016'
+    },
+    instances: 1,
+    exec_mode: 'fork',
+    watch: false,
+    max_memory_restart: '500M',
+    error_file: '/home/vlabs/logs/mission-control-new-error.log',
+    out_file: '/home/vlabs/logs/mission-control-new-out.log',
+    log_file: '/home/vlabs/logs/mission-control-new.log'
+  }]
+};
+JSEOF
+
+          # Create logs directory
+          mkdir -p ~/logs
+          
+          # Stop existing app if running
+          pm2 stop mission-control-new || true
+          pm2 delete mission-control-new || true
+          
+          # Start new app
+          pm2 start ecosystem.config.js
+          pm2 save
+          
+          echo "Mission Control deployed successfully on port 3016"
+EOF
+
+    - name: Update Caddy configuration
+      run: |
+        ssh vlabs@89.167.101.65 << 'EOF'
+          # Add control.vanishlabs.uk to Caddyfile
+          sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.backup
+          
+          # Check if control.vanishlabs.uk already exists
+          if ! grep -q "control.vanishlabs.uk" /etc/caddy/Caddyfile; then
+            echo "" | sudo tee -a /etc/caddy/Caddyfile
+            echo "control.vanishlabs.uk {" | sudo tee -a /etc/caddy/Caddyfile
+            echo "    reverse_proxy 127.0.0.1:3016" | sudo tee -a /etc/caddy/Caddyfile
+            echo "    log {" | sudo tee -a /etc/caddy/Caddyfile
+            echo "        output file /var/log/caddy/control.vanishlabs.uk.log" | sudo tee -a /etc/caddy/Caddyfile
+            echo "    }" | sudo tee -a /etc/caddy/Caddyfile
+            echo "}" | sudo tee -a /etc/caddy/Caddyfile
+            
+            # Reload Caddy
+            sudo systemctl reload caddy
+            echo "Caddy configuration updated for control.vanishlabs.uk"
+          else
+            echo "control.vanishlabs.uk already configured"
+          fi
+EOF
+
+    - name: Health Check
+      run: |
+        echo "Waiting for application to start..."
+        sleep 10
+        
+        # Test local port
+        ssh vlabs@89.167.101.65 "curl -f http://localhost:3016/api/status?action=health -H 'x-api-key: ${{ secrets.MC_API_KEY }}' || echo 'Health check failed'"
+        
+        echo "Deployment completed! Check https://control.vanishlabs.uk"
